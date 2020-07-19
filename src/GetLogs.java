@@ -16,8 +16,8 @@ public class GetLogs {
 
 	public static void main(String[] args) throws ParseException, IOException {
 
-		Date startDate = parseISODateString("2020-06-24T16:25:58.8450Z");
-		Date endDate = parseISODateString("2020-06-24T16:26:00.8550Z");
+		Date startDate = parseISODateString("2020-06-17T16:56:51.5970Z");
+		Date endDate = parseISODateString("2020-07-17T16:56:51.6000Z");
 
 		String path = "logs/2/";
 		File directoryPath = new File(path);
@@ -25,42 +25,36 @@ public class GetLogs {
 		Arrays.sort(files);
 
 		int low = 0, high= files.length-1, mid= (low+high)/2, index=files.length;
-	
-		while(low<high) {
-			mid = (low + high)/2;
 
+		while(low<=high) {
+			mid = low + (high - low) / 2; 
 			File file = new File(directoryPath+"/"+files[mid]);
 			BufferedReader br = new BufferedReader(new FileReader(file));
 			Date logEntryDate = parseISODateString(br.readLine().split(",")[0]);
 
 			if(logEntryDate.before(startDate)) {
 				if(low==mid) {
-					index=high;
 					break;
 				}
-				low=mid;
+				low=mid+1;
 			} else {
-				high=mid;
+				high=mid-1;
+				if(logEntryDate.before(endDate)) {
+					index=mid;
+				}
 			}
 			br.close();
 		}
+
+		int left= (index == files.length) ?  high : Math.max(index-1, 0);
+
+		int right = Math.max(findSecondInterchange(files, directoryPath, startDate, endDate, left+1, files.length - 1), left);	
 		
-		int left=Math.max(index-1, 0), right;
-		
-		if(index==files.length) {
-			right = left;
-		} else {
-			right = Math.max(findSecondInterchange(files, directoryPath, startDate, endDate, index+1, files.length) - 1, left);	
-		}
-		
-//		System.out.println("left: "+left+" right: "+right);
-//		System.exit(1);
 		for(int i=left; i>=0 && i<=right; i++) {
 			String str = null;
 			File file = new File(directoryPath+"/"+files[i]);
 
 			if(i==left || i==right) {
-				//				printPartialLogFiles(files[i], directoryPath, startDate, endDate, (i==right));
 				if(i==left) {
 					printFirstFile(file, startDate, endDate);
 				} else {
@@ -72,90 +66,37 @@ public class GetLogs {
 				while((str = br.readLine()) != null) {
 					System.out.println(str);
 				}
-				
+
 				br.close();
 			}	
 		}
 	}
 
-	static public void printPartialLogFiles(String fileName, File directoryPath, Date startDate, Date endDate, boolean lastFile) throws ParseException, IOException {
-
-		File file = new File(directoryPath+"/"+fileName);
-		RandomAccessFile randomAccessFile = new RandomAccessFile(file, "r");
-		String str = null;
-		//		readFromLast(file, 4);
-		long low=0, high=file.length(), index=-1;
-
-		while(low<high) {
-			long mid = (low+high)/2;
-			//			System.out.println(mid);
-
-			try {
-				String dateTimeString = getTimstampBeforeNChars(file, mid).trim();
-				Date logDate = parseISODateString(dateTimeString);	
-
-				if(lastFile) {
-					if(logDate.after(startDate)) {
-						high = mid;
-					} else {
-						if(low==mid) {
-							index=low;
-							high--;
-						}
-						low = mid;
-					}
-				} else {
-					if(logDate.before(endDate)) {
-						if(low==mid) {
-							high--;
-						}
-						low = mid;
-					} else {
-						high = mid;
-					}
-				}
-
-				//				System.out.println(dateTimeString+" "+low+" "+high);
-			} catch (IllegalArgumentException e) {
-				e.printStackTrace();
-				break;
-			}
-		}
-		randomAccessFile.seek(low+2);
-		while((str=randomAccessFile.readLine()) != null) {
-			Date logEntryDate = parseISODateString(str.split(",")[0]);
-			if(logEntryDate.before(endDate) && logEntryDate.after(startDate)) {
-				System.out.println(str);
-			} else if(lastFile) {
-				break;
-			}
-		}
-
-	}
-
 	static void printFirstFile(File file, Date startDate, Date endDate) throws IOException {
 		long low=0, high=file.length(), index=0;
 
-		while(low<high) {
-			long mid = (low+high)/2;
+		while(low<=high) {
+			long mid = low + (high-low)/2;
 			String dateTimeString = getTimstampBeforeNChars(file, mid).trim();
-			Date logDate = parseISODateString(dateTimeString);
+			try {
+				Date logDate = parseISODateString(dateTimeString);
 
-			if(logDate.after(startDate)) {
-				high = mid;
-			} else {
-				if(low==mid) {
-					index=low;
-					break;
+				if(logDate.after(startDate)) {
+					high = mid-1;
+				} else {
+					low = mid+1;
 				}
-				low = mid;
-			}	
+			} catch (IllegalArgumentException e) {
+				break;
+			}
 		}
 		
-		if(index != 0) {
-			printPartialLogFile(file, startDate, endDate, index+2);	
+		high = Math.max(high, 0);
+
+		if(high != 0) {
+			printPartialLogFile(file, startDate, endDate, high+2);	
 		} else {
-			printPartialLogFile(file, startDate, endDate, index);
+			printPartialLogFile(file, startDate, endDate, high);
 		}
 	}
 
@@ -168,7 +109,7 @@ public class GetLogs {
 		randomAccessFile.seek(skipChars);
 
 		String str;
-		
+
 		while((str=randomAccessFile.readLine()) != null) {
 			Date logEntryDate = parseISODateString(str.split(",")[0]);
 			if(logEntryDate.before(endDate) && logEntryDate.after(startDate)) {
@@ -187,28 +128,25 @@ public class GetLogs {
 	}
 
 	static public int findSecondInterchange(String[] files, File directoryPath, Date startDate, Date endDate, int low, int high) throws ParseException, IOException {
-		int mid= (low+high)/2, index=files.length-1;
+		int mid= (low+high)/2, index=-1;
 
-		while(low<high) {
-			mid = (low + high)/2;
+		while(low<=high) {
+			mid = low + (high - low)/2;
 
 			File file = new File(directoryPath+"/"+files[mid]);
 			BufferedReader br = new BufferedReader(new FileReader(file));
 			Date logEntryDate = parseISODateString(br.readLine().split(",")[0]);
 
 			if(logEntryDate.after(endDate)) {
-				high=mid;
+				high=mid-1;
 			} else {
-				if(low==mid) {
-					index=low;
-					break;
+				if(logEntryDate.after(startDate)) {
+					index=mid;
 				}
-				low=mid;
+				low=mid+1;
 			}
-			
 			br.close();
 		}
-		
 		return index;
 	}
 
@@ -225,7 +163,7 @@ public class GetLogs {
 				randomAccessFile.seek(pointer);
 				pointer--;
 			}
-			//			System.out.println(skipChars+"  "+pointer);
+			
 			if(pointer!=0) {
 				pointer++;
 			}
