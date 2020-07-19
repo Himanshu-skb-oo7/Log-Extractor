@@ -1,87 +1,167 @@
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.Date;
+import java.util.HashMap;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileReader;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.RandomAccessFile;
-import java.text.DateFormat;
 import java.text.ParseException;
-import java.text.SimpleDateFormat;
 
 public class GetLogs {
-	private static BufferedReader br;
+	private static BufferedReader BR;
+	private static Date FROM_DATE;
+	private static Date TO_DATE;
+	private static File DIR_LOC;
+
+	private static String FROM_DATE_FLAG = "f";
+	private static String TO_DATE_FLAG = "t";
+	private static String DIR_LOC_FLAG = "i";
+
+	private static String[] SUPPORTED_FILE_TYPES = {".log"};
 
 	public static void main(String[] args) throws ParseException, IOException {
+		
+		long startTime = System.nanoTime();
 
-		Date startDate = parseISODateString("2020-06-17T00:56:51.5970Z");
-		Date endDate = parseISODateString("2020-06-17T23:56:51.6000Z");
+		parsingArguments(args);
 
-		String path = "logs/2/";
-		File directoryPath = new File(path);
-		String files[] = directoryPath.list();
+		FilenameFilter filterSupportedTypeFiles = new FilenameFilter() {
+			@Override
+			public boolean accept(File dir, String name) {
+				for(String supportedFileType: SUPPORTED_FILE_TYPES) {
+					if(name.endsWith(supportedFileType)) {
+						return true;
+					}
+				}
+				return false;
+			}
+		};
 
-		Arrays.sort(files); // sorting file order according to their names
+		// returns pathnames for files and directory
+
+		String[] files = DIR_LOC.list(filterSupportedTypeFiles);
+		
+		// Avoid sorting in case there is not supported files in the specified directory.
+		if(files.length != 0) {
+			Arrays.sort(files); // sorting file order according to their names
+		}
 
 		int low = 0, high= files.length-1, mid= (low+high)/2, index=files.length;
-		
+
 		// Finding the file range that contains the desired log entries using Binary Search.
 		while(low<=high) {
 			mid = low + (high - low) / 2; 
-			File file = new File(directoryPath+"/"+files[mid]);
+			File file = getFile(files[mid]);
 			BufferedReader br = new BufferedReader(new FileReader(file));
 			Date logEntryDate = parseISODateString(br.readLine().split(",")[0]);
 
-			if(logEntryDate.before(startDate)) {
+			if(logEntryDate.before(FROM_DATE)) {
 				low=mid+1;
 			} else {
 				high=mid-1;
-				if(logEntryDate.before(endDate)) {
+				if(logEntryDate.before(TO_DATE)) {
 					index=mid;
 				}
 			}
 			br.close();
 		}
 
-
-
 		int left= (index == files.length) ?  high : Math.max(index-1, 0);
 
 		// Getting the right limit of files where desired logEntry could be present
-		int right = Math.max(
-				findSecondInterchange(files, directoryPath, startDate, endDate, left+1, files.length - 1), 
-				left
-				);	
-
+		int right = Math.max(findSecondInterchange(files, left+1, files.length - 1), left);	
+		
 		for(int i=left; i>=0 && i<=right; i++) {
 			String str = null;
-			File file = new File(directoryPath+"/"+files[i]);
+			File file = getFile(files[i]);
 
 			if(i==left || i==right) {
 				// Handling first and last files explicitly
 				if(i==left) {
-					printFirstFile(file, startDate, endDate);
+					printFirstFile(file);
 				} else {
-					printLastFile(file, startDate, endDate);
+					printLastFile(file);
 				}
 			} else {
 				// Getting file data into the buffer
-				br = new BufferedReader(new FileReader(file));
+				BR = new BufferedReader(new FileReader(file));
 
 				// Printing data until EOF
-				while((str = br.readLine()) != null) {
+				while((str = BR.readLine()) != null) {
 					System.out.println(str);
 				}
 
 				// close file connection
-				br.close();
+				BR.close();
 			}	
 		}
+		
+		long endTime = System.nanoTime();
+		System.out.println(String.format("Query Successfully executed in %ss", (endTime-startTime)/(Math.pow(10, 9))));
 	}
 
-	static void printFirstFile(File file, Date startDate, Date endDate) throws IOException {
+	static void processFlagValues(HashMap<String, String> flagsAndValues) {
+
+		try {
+			FROM_DATE = parseISODateString(flagsAndValues.get(FROM_DATE_FLAG));
+			flagsAndValues.remove(FROM_DATE_FLAG);
+		} catch (Exception e) {
+			throw new IllegalArgumentException(String.format("Not a valid argument for -%s flag", FROM_DATE_FLAG));
+		}
+
+		try {
+			TO_DATE = parseISODateString(flagsAndValues.get(TO_DATE_FLAG));
+		} catch (Exception e) {
+			throw new IllegalArgumentException(String.format("Not a valid argument for -%s flag", TO_DATE_FLAG));
+		}
+
+		DIR_LOC = parseDirectoryLocation(flagsAndValues.get(DIR_LOC_FLAG));
+
+	}
+
+	static File parseDirectoryLocation(String dirLoc) throws IllegalArgumentException{
+
+		if(dirLoc == null) {
+			throw new IllegalArgumentException("Directory Location is required.");
+		}
+
+		return new File(dirLoc);
+	}
+
+	static void parsingArguments(String[] args) {
+
+		HashMap<String, String> flagsAndValues = new HashMap<>();
+
+		for (int i = 0; i < args.length; i++) {
+			switch (args[i].charAt(0)) {
+			case '-':
+				if (args[i].length() != 2)
+					throw new IllegalArgumentException("Not a valid argument: "+args[i]);
+				else {
+					if (args[i].charAt(1) == '-') {
+						throw new IllegalArgumentException("Not a valid flag: "+args[i]);
+					} else {
+						if(args.length-1 == i) {
+							throw new IllegalArgumentException("Expecting an agrument after "+args[i]);
+						} else {
+							flagsAndValues.put(args[i].substring(1), args[i+1]);
+							i++;
+						}
+					}
+				}
+				break;
+			default:
+				throw new IllegalArgumentException("Not a valid argument: "+args[i]);
+			}
+		}
+
+		processFlagValues(flagsAndValues);
+	}
+
+	static void printFirstFile(File file) throws IOException {
 		long low=0, high=file.length();
 
 		// Finding the First TimeStamp of the file which are in the given dateTime range using Binary Search
@@ -91,7 +171,7 @@ public class GetLogs {
 			try {
 				Date logDate = parseISODateString(dateTimeString);
 
-				if(logDate.after(startDate)) {
+				if(logDate.after(FROM_DATE)) {
 					high = mid-1;
 				} else {
 					low = mid+1;
@@ -105,15 +185,19 @@ public class GetLogs {
 		// Handling final high value
 		high = Math.max(high, 0);
 		// Calling printPartialLogFile to print the logEntries after 'high' characters.
-		printPartialLogFile(file, startDate, endDate, high);	
+		printPartialLogFile(file, high);	
 	}
 
-	static void printLastFile(File file, Date startDate, Date endDate) throws IOException {
+	static File getFile(String fileName) {
+		return new File(DIR_LOC+"/"+fileName);
+	}
+
+	static void printLastFile(File file) throws IOException {
 		// Calling printPartialLogFile for printing the logEntries.
-		printPartialLogFile(file, startDate, endDate, 0);	
+		printPartialLogFile(file, 0);	
 	}
 
-	static void printPartialLogFile(File file, Date startDate, Date endDate, long skipChars) throws IOException {
+	static void printPartialLogFile(File file, long skipChars) throws IOException {
 		// Getting to RandomAccessFile object for file processing
 		RandomAccessFile randomAccessFile = new RandomAccessFile(file, "r");
 
@@ -128,7 +212,7 @@ public class GetLogs {
 				// Parsing ISO DatTime String 
 				Date logEntryDate = parseISODateString(str.split(",")[0]);
 				// Checking whether the log Entry lies between the given dateTime range
-				if(logEntryDate.before(endDate) && logEntryDate.after(startDate)) {
+				if(logEntryDate.before(TO_DATE) && logEntryDate.after(FROM_DATE)) {
 					// Printing the LogEntry
 					System.out.println(str);
 				} else {
@@ -149,21 +233,21 @@ public class GetLogs {
 		return javax.xml.bind.DatatypeConverter.parseDateTime(date).getTime();
 	}
 
-	static public int findSecondInterchange(String[] files, File directoryPath, Date startDate, Date endDate, int low, int high) throws ParseException, IOException {
+	static public int findSecondInterchange(String[] files, int low, int high) throws ParseException, IOException {
 		int mid= (low+high)/2, index=-1;
 
 		// Finding the File after which No file contains the log entry in the given date range
 		while(low<=high) {
 			mid = low + (high - low)/2;
 
-			File file = new File(directoryPath+"/"+files[mid]);
+			File file = getFile(files[mid]);
 			BufferedReader br = new BufferedReader(new FileReader(file));
 			Date logEntryDate = parseISODateString(br.readLine().split(",")[0]);
 
-			if(logEntryDate.after(endDate)) {
+			if(logEntryDate.after(TO_DATE)) {
 				high=mid-1;
 			} else {
-				if(logEntryDate.after(startDate)) {
+				if(logEntryDate.after(FROM_DATE)) {
 					index=mid;
 				}
 				low=mid+1;
