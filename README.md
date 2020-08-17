@@ -14,3 +14,13 @@ Example logline:
 
 The command line (CLI) for the desired program is as below
 > LogExtractor.exe -f "From Time" -t "To Time" -i "Log file directory location" 
+
+#### Time Complexity:   2*O(log(N)) + O(log(M))
+
+Where, N = Total No. of Files in the specified directory and
+       M = Total no. of lines in the file.
+
+Since M>>>>>N
+
+#### Overall Complexity: O(log(M))
+
